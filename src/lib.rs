@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let qc = QueueClient::connect(&"host=localhost user=yairvogel db=db password=atzmon01");
+        let qc = QueueClient::connect(&"host=localhost user=postgres db=db");
 
     }
 }
