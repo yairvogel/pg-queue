@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn send_and_receive() {
-        let mut qc = QueueClient::connect(DB_CONNSTRING, "queue").unwrap();
+        let mut qc = QueueClient::connect(DB_CONNSTRING, "send_receive").unwrap();
         qc.try_create_queue().unwrap();
         qc.enqueue("Hello World".as_bytes()).expect("should be able to insert message");
         assert_eq!("queue", qc.queue_name.as_str());
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn receive_without_message() {
-        let mut qc = QueueClient::connect(DB_CONNSTRING, "queue").unwrap();
+        let mut qc = QueueClient::connect(DB_CONNSTRING, "only_receive").unwrap();
         qc.try_create_queue().unwrap();
         let message = qc.dequeue().expect("should be able to query for message");
         assert!(message.is_none());
