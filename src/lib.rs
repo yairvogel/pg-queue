@@ -2,7 +2,7 @@ use uuid::Uuid;
 use std::time::SystemTime;
 
 pub struct QueueClient {
-    p_client: Client,
+    p_client: postgres::Client,
     queue_name: String,
 }
 
@@ -10,6 +10,12 @@ pub struct QueueMessage {
     pub id: Uuid,
     pub inserted_at: SystemTime,
     pub data: Vec<u8>
+}
+
+#[derive(Debug)]
+pub enum Error {
+    PostgresError(postgres::Error),
+    QueueError(&'static str),
 }
 
 impl QueueClient {
@@ -25,13 +31,16 @@ impl QueueClient {
         }
     }
 
-    pub fn enqueue(&mut self, data: &[u8]) -> Result<(), postgres::Error> {
-        self.p_client.execute(format!("INSERT INTO {table} (data) VALUES ($1)", table=self.queue_name).as_str(), &[&data])?;
-        Ok(())
+    pub fn enqueue(&mut self, data: &[u8]) -> Result<(), Error> {
+        let result = self.p_client.execute(format!("INSERT INTO {table} (data) VALUES ($1)", table=self.queue_name).as_str(), &[&data]);
+        match result {
+            Err(err) => Err(Error::PostgresError(err)),
+            _ => Ok(())
+        }
     }
 
-    pub fn dequeue(&mut self) -> Result<Option<QueueMessage>, postgres::Error> {
-        let result = self.p_client.query(format!("
+    pub fn dequeue(&mut self) -> Result<Option<QueueMessage>, Error> {
+        let response = self.p_client.query(format!("
             DELETE FROM {table} q
             WHERE q.id = (
                  SELECT q_in.id
@@ -39,18 +48,24 @@ impl QueueClient {
                  ORDER BY q_in.inserted_at ASC
                  FOR UPDATE SKIP LOCKED
                  LIMIT 1)
-            RETURNING q.id, q.inserted_at, q.data", table=self.queue_name).as_str(), &[])?;
+            RETURNING q.id, q.inserted_at, q.data", table=self.queue_name).as_str(), &[]);
 
-        if result.len() == 0 {
-            return Ok(None)
-        }
+        let result = match response {
+            Err(err) => return Err(Error::PostgresError(err)),
+            Ok(result) => result
+        };
 
-        let row = &result[0];
+
+        let row = match result.len() {
+            1 => &result[0],
+            0 => return Ok(None),
+            _ => return Err(Error::QueueError("expected one row, got multiple rows."))
+        };
 
         Ok(Some(QueueMessage {
             id: row.get::<usize, Uuid>(0),
             inserted_at: row.get::<usize, SystemTime>(1),
-            data: row.get::<usize, Vec<u8>>(2),
+            data: row.get::<usize, Vec<u8>>(2)
         }))
     }
 
@@ -62,7 +77,7 @@ impl QueueClient {
                 data BYTEA);
             CREATE INDEX IF NOT EXISTS inserted_at ON {table} (inserted_at);", table=&self.queue_name).as_str())?;
 
-            Ok(())
+        Ok(())
     }
 
 }
