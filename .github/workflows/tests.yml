@@ -18,7 +18,9 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build
       run: cargo build --verbose
-    - name: Run postgres
-      run: cd psql_image && docker compose up && cd ..
+    - name: Docker Compose Action
+      uses: isbang/compose-action@v1.5.1
+      with:
+        compose-file: "./psql_image/docker_compose.yml"
     - name: Run tests
       run: cargo test --verbose
