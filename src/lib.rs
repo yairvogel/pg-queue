@@ -70,14 +70,28 @@ impl QueueClient {
     }
 
     pub fn try_create_queue(&mut self) -> Result<(), postgres::Error> {
-        self.p_client.batch_execute(
-            format!("CREATE TABLE IF NOT EXISTS {table} (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                inserted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                data BYTEA);
-            CREATE INDEX IF NOT EXISTS inserted_at ON {table} (inserted_at);", table=&self.queue_name).as_str())?;
+        if !self.table_exists()? {
+            self.p_client.batch_execute(
+                format!(
+                    "CREATE TABLE IF NOT EXISTS {table} (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    inserted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    data BYTEA);
+                    CREATE INDEX IF NOT EXISTS inserted_at_{table} ON {table} (inserted_at);", table=&self.queue_name).as_str())?;
+        }
 
         Ok(())
+    }
+
+    fn table_exists(&mut self) -> Result<bool, postgres::Error> {
+        let row = self.p_client.query_one(
+            "SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = $1
+        )", &[&self.queue_name])?;
+
+        Ok(row.get(0))
     }
 
 }
@@ -91,9 +105,8 @@ mod tests {
     #[test]
     fn send_and_receive() {
         let mut qc = QueueClient::connect(DB_CONNSTRING, "send_receive").unwrap();
-        qc.try_create_queue().unwrap();
+        qc.try_create_queue().expect("should be able to create queue");
         qc.enqueue("Hello World".as_bytes()).expect("should be able to insert message");
-        assert_eq!("queue", qc.queue_name.as_str());
         let message = qc.dequeue().unwrap();
         assert_eq!(message.expect("should contain a row").data, "Hello World".as_bytes());
     }
@@ -101,22 +114,22 @@ mod tests {
     #[test]
     fn receive_without_message() {
         let mut qc = QueueClient::connect(DB_CONNSTRING, "only_receive").unwrap();
-        qc.try_create_queue().unwrap();
+        qc.try_create_queue().expect("should be able to create queue");
         let message = qc.dequeue().expect("should be able to query for message");
         assert!(message.is_none());
     }
 
     #[test]
     fn receive_ordered() {
-        let mut pclient = QueueClient::connect(DB_CONNSTRING, "queue_ordered").unwrap();
-        pclient.try_create_queue().expect("should be able to create queue"); 
+        let mut qc = QueueClient::connect(DB_CONNSTRING, "queue_ordered").unwrap();
+        qc.try_create_queue().expect("should be able to create queue"); 
 
         for n in 1i32..10 {
-            pclient.enqueue(&n.to_ne_bytes()).expect("should be able to enqueue");
+            qc.enqueue(&n.to_ne_bytes()).expect("should be able to enqueue");
         }
 
         for expected in 1i32..10 {
-            let message = pclient.dequeue().unwrap().unwrap();
+            let message = qc.dequeue().unwrap().unwrap();
             let actual = deserialize_i32(&message.data);
             assert_eq!(expected, actual)
         }
